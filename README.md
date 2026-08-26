@@ -17,7 +17,8 @@ subsequent launches start up instantly without rescanning.
 - Delete an artist or song from the library (with confirmation) without
   touching the files on disk
 - Tag reading via [lofty](https://github.com/Serial-ATA/lofty-rs) (artist,
-  album, year, track number, title, duration)
+  album, year, track number, title, duration, bitrate), with bitrate and
+  track time shown alongside each song
 - Library persisted in a local SQLite database (via `rusqlite`), so imports
   only need to happen once
 

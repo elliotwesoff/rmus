@@ -65,6 +65,8 @@ fn draw_artists(frame: &mut Frame, app: &mut App, area: Rect) {
 fn draw_songs(frame: &mut Frame, app: &mut App, area: Rect) {
     let focused = app.focus == Focus::Songs;
     let now_playing = player::lock_status(&app.player_status).current.clone();
+    // Border consumes one column on each side of the list.
+    let inner_width = area.width.saturating_sub(2) as usize;
 
     // Songs are pre-sorted by album, so album boundaries are just runs of equal (album, year);
     // header rows are inserted inline, which shifts the selected song's row index within the
@@ -102,14 +104,26 @@ fn draw_songs(frame: &mut Frame, app: &mut App, area: Rect) {
                 .as_ref()
                 .is_some_and(|np| np.artist_idx == app.selected_artist && np.song_idx == idx);
 
+            let marker = if is_playing { "▶ " } else { "  " };
+            let left = format!("{marker}{track}. {}", s.title);
+            let bitrate = s
+                .bitrate
+                .map(|kbps| format!("{kbps} kbps"))
+                .unwrap_or_else(|| "-- kbps".to_string());
+            let right = format!("{bitrate}  {}", format_duration(s.duration));
+            let padding = inner_width
+                .saturating_sub(left.chars().count() + right.chars().count())
+                .max(1);
+            let text = format!("{left}{:padding$}{right}", "");
+
             let item = if is_playing {
-                ListItem::new(format!("▶ {track}. {}", s.title)).style(
+                ListItem::new(text).style(
                     Style::default()
                         .fg(Color::Green)
                         .add_modifier(Modifier::BOLD),
                 )
             } else {
-                ListItem::new(format!("  {track}. {}", s.title))
+                ListItem::new(text)
             };
             items.push(item);
         }

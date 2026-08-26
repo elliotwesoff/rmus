@@ -13,6 +13,8 @@ pub struct Song {
     pub track_number: Option<u32>,
     pub path: PathBuf,
     pub duration: Duration,
+    /// Audio bitrate in kbps, if the tag reader could determine one.
+    pub bitrate: Option<u32>,
 }
 
 #[derive(Debug, Clone)]
@@ -59,6 +61,7 @@ pub struct LibraryEntry {
     pub track_number: Option<u32>,
     pub title: String,
     pub duration: Duration,
+    pub bitrate: Option<u32>,
 }
 
 impl Library {
@@ -84,6 +87,7 @@ impl Library {
                 track_number: entry.track_number,
                 path: entry.path,
                 duration: entry.duration,
+                bitrate: entry.bitrate,
             });
         }
 
@@ -129,6 +133,7 @@ pub fn scan(root: &Path) -> Result<Vec<LibraryEntry>, LibraryError> {
             track_number: tags.track_number,
             title: tags.title,
             duration: tags.duration,
+            bitrate: tags.bitrate,
         });
     }
 
@@ -183,6 +188,7 @@ struct SongTags {
     year: Option<u16>,
     track_number: Option<u32>,
     duration: Duration,
+    bitrate: Option<u32>,
 }
 
 /// Reads artist/title/album/year/track-number/duration from an mp3's ID3 tags, falling back to
@@ -192,7 +198,9 @@ fn read_tags(path: &Path) -> Result<SongTags, LibraryError> {
         message: format!("{}: {}", path.display(), e),
     })?;
 
-    let duration = tagged_file.properties().duration();
+    let properties = tagged_file.properties();
+    let duration = properties.duration();
+    let bitrate = properties.audio_bitrate();
     let tag = tagged_file.primary_tag().or_else(|| tagged_file.first_tag());
 
     let artist = tag
@@ -229,5 +237,6 @@ fn read_tags(path: &Path) -> Result<SongTags, LibraryError> {
         year,
         track_number,
         duration,
+        bitrate,
     })
 }

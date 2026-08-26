@@ -17,22 +17,24 @@ const CREATE_TABLE_SQL: &str = "
         year         INTEGER,
         track_number INTEGER,
         title        TEXT    NOT NULL,
-        duration_ms  INTEGER NOT NULL
+        duration_ms  INTEGER NOT NULL,
+        bitrate_kbps INTEGER
     )";
 
 const UPSERT_SQL: &str = "
-    INSERT INTO songs (path, artist, album, year, track_number, title, duration_ms)
-    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+    INSERT INTO songs (path, artist, album, year, track_number, title, duration_ms, bitrate_kbps)
+    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
     ON CONFLICT(path) DO UPDATE SET
         artist = excluded.artist,
         album = excluded.album,
         year = excluded.year,
         track_number = excluded.track_number,
         title = excluded.title,
-        duration_ms = excluded.duration_ms";
+        duration_ms = excluded.duration_ms,
+        bitrate_kbps = excluded.bitrate_kbps";
 
 const SELECT_ALL_SQL: &str =
-    "SELECT path, artist, album, year, track_number, title, duration_ms FROM songs";
+    "SELECT path, artist, album, year, track_number, title, duration_ms, bitrate_kbps FROM songs";
 
 pub struct Db {
     conn: Connection,
@@ -67,6 +69,21 @@ impl From<std::io::Error> for DbError {
     }
 }
 
+/// Adds the `bitrate_kbps` column to a database created before it existed. `CREATE TABLE IF NOT
+/// EXISTS` only handles brand-new databases, so an existing `songs` table needs this explicit
+/// migration to pick up the new column.
+fn add_bitrate_column_if_missing(conn: &Connection) -> Result<(), DbError> {
+    let has_column: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM pragma_table_info('songs') WHERE name = 'bitrate_kbps'",
+        [],
+        |row| row.get(0),
+    )?;
+    if has_column == 0 {
+        conn.execute("ALTER TABLE songs ADD COLUMN bitrate_kbps INTEGER", [])?;
+    }
+    Ok(())
+}
+
 impl Db {
     /// Opens (creating if needed) the library database in the user's XDG data directory.
     pub fn open() -> Result<Self, DbError> {
@@ -77,6 +94,7 @@ impl Db {
 
         let conn = Connection::open(dirs.data_dir().join("library.db"))?;
         conn.execute(CREATE_TABLE_SQL, [])?;
+        add_bitrate_column_if_missing(&conn)?;
 
         Ok(Db { conn })
     }
@@ -95,6 +113,7 @@ impl Db {
                     entry.track_number.map(i64::from),
                     entry.title,
                     entry.duration.as_millis() as i64,
+                    entry.bitrate.map(i64::from),
                 ])?;
             }
         }
@@ -132,6 +151,7 @@ impl Db {
                 let year: Option<i64> = row.get(3)?;
                 let track_number: Option<i64> = row.get(4)?;
                 let duration_ms: i64 = row.get(6)?;
+                let bitrate: Option<i64> = row.get(7)?;
                 Ok(LibraryEntry {
                     path: PathBuf::from(path),
                     artist: row.get(1)?,
@@ -140,6 +160,7 @@ impl Db {
                     track_number: track_number.map(|t| t as u32),
                     title: row.get(5)?,
                     duration: Duration::from_millis(duration_ms as u64),
+                    bitrate: bitrate.map(|b| b as u32),
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
