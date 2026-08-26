@@ -324,7 +324,7 @@ impl App {
         let rest = parts.next().unwrap_or("").trim();
 
         match cmd {
-            "add" => {
+            "add" | "a" => {
                 if rest.is_empty() {
                     self.set_error("add requires a path argument".to_string());
                 } else {

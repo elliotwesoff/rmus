@@ -174,7 +174,7 @@ fn draw_command(frame: &mut Frame, app: &App, area: Rect) {
                 Some(msg) if msg.is_error => (msg.text.clone(), Style::default().fg(Color::Red)),
                 Some(msg) => (msg.text.clone(), Style::default()),
                 None => (
-                    "Press : for a command, <esc> to quit.".to_string(),
+                    "Press : to enter commands, <esc> to quit.".to_string(),
                     Style::default().fg(Color::DarkGray),
                 ),
             };
