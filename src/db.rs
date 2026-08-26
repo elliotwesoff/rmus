@@ -108,6 +108,19 @@ impl Db {
         Ok(())
     }
 
+    /// Removes the given paths from the database. Never touches the files on disk.
+    pub fn remove_paths(&mut self, paths: &[PathBuf]) -> Result<(), DbError> {
+        let tx = self.conn.transaction()?;
+        {
+            let mut stmt = tx.prepare("DELETE FROM songs WHERE path = ?1")?;
+            for path in paths {
+                stmt.execute(rusqlite::params![path.to_string_lossy()])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     /// Loads every known song and groups it into a `Library`. This is the single function used
     /// to build the in-memory library, whether at startup or after any command that mutates the
     /// database, so the database is always the one source of truth for library contents.

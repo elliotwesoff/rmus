@@ -1,5 +1,5 @@
 use std::collections::VecDeque;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use ratatui::widgets::ListState;
@@ -19,6 +19,14 @@ pub enum Mode {
     Normal,
     Command,
     Search,
+    ConfirmDelete,
+}
+
+/// An artist or song awaiting confirmation for removal from the library (see `start_delete`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PendingDelete {
+    Artist(usize),
+    Song { artist_idx: usize, song_idx: usize },
 }
 
 const VOLUME_STEP: f32 = 0.05;
@@ -43,6 +51,8 @@ pub struct App {
     search_focus: Focus,
     /// Selection to restore if the search is cancelled with `Esc`.
     search_origin: (usize, usize),
+    /// Artist/song awaiting a `y`/`n` deletion confirmation (see `Mode::ConfirmDelete`).
+    pending_delete: Option<PendingDelete>,
     pub status_message: Option<StatusMessage>,
     pub quit_prompted: bool,
     pub should_quit: bool,
@@ -73,6 +83,7 @@ impl App {
             search_match_pos: 0,
             search_focus: Focus::Artists,
             search_origin: (0, 0),
+            pending_delete: None,
             status_message: None,
             quit_prompted: false,
             should_quit: false,
@@ -141,6 +152,15 @@ impl App {
             return;
         }
 
+        if self.mode == Mode::ConfirmDelete {
+            match code {
+                KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => self.confirm_delete(),
+                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => self.cancel_delete(),
+                _ => {}
+            }
+            return;
+        }
+
         if self.mode == Mode::Search {
             match code {
                 KeyCode::Enter => {
@@ -182,6 +202,7 @@ impl App {
             KeyCode::Char('/') => self.start_search(),
             KeyCode::Char('n') => self.jump_search(1),
             KeyCode::Char('N') => self.jump_search(-1),
+            KeyCode::Char('d') => self.start_delete(),
             KeyCode::Esc => {
                 if !self.command_input.is_empty() {
                     self.command_input.clear();
@@ -458,6 +479,123 @@ impl App {
         let idx = self.search_matches[self.search_match_pos];
         self.set_search_selection(idx);
         self.report_search_status();
+    }
+
+    /// Prompts for confirmation before removing the artist or song currently under the cursor.
+    /// No-ops if the active pane is empty.
+    fn start_delete(&mut self) {
+        self.try_start_delete();
+    }
+
+    fn try_start_delete(&mut self) -> Option<()> {
+        let pending = match self.focus {
+            Focus::Artists => {
+                if self.library.artists.is_empty() {
+                    return None;
+                }
+                PendingDelete::Artist(self.selected_artist)
+            }
+            Focus::Songs => {
+                let artist = self.library.artists.get(self.selected_artist)?;
+                if artist.songs.is_empty() {
+                    return None;
+                }
+                PendingDelete::Song {
+                    artist_idx: self.selected_artist,
+                    song_idx: self.selected_song,
+                }
+            }
+        };
+        self.pending_delete = Some(pending);
+        self.mode = Mode::ConfirmDelete;
+        Some(())
+    }
+
+    /// Text for the pending "Remove ...?" confirmation prompt, or `None` if nothing is pending
+    /// (including if the pending selection somehow no longer exists in the library).
+    pub fn delete_prompt(&self) -> Option<String> {
+        match self.pending_delete? {
+            PendingDelete::Artist(idx) => {
+                let artist = self.library.artists.get(idx)?;
+                Some(format!(
+                    "Remove {} ({} tracks)? (y/n)",
+                    artist.name,
+                    artist.songs.len()
+                ))
+            }
+            PendingDelete::Song {
+                artist_idx,
+                song_idx,
+            } => {
+                let artist = self.library.artists.get(artist_idx)?;
+                let song = artist.songs.get(song_idx)?;
+                Some(format!("Remove {} (1 tracks)? (y/n)", song.title))
+            }
+        }
+    }
+
+    fn cancel_delete(&mut self) {
+        self.pending_delete = None;
+        self.mode = Mode::Normal;
+    }
+
+    /// Removes the pending artist/song from the database only (never from disk) and reloads the
+    /// library. Stops playback first if the deleted item is what's currently playing, since its
+    /// artist/song indices are about to become stale.
+    fn confirm_delete(&mut self) {
+        self.mode = Mode::Normal;
+        self.try_confirm_delete();
+    }
+
+    fn try_confirm_delete(&mut self) -> Option<()> {
+        let pending = self.pending_delete.take()?;
+
+        let now_playing = player::lock_status(&self.player_status).current.clone();
+
+        let (paths, stop_playback, info): (Vec<PathBuf>, bool, String) = match pending {
+            PendingDelete::Artist(idx) => {
+                let artist = self.library.artists.get(idx)?;
+                let paths = artist.songs.iter().map(|s| s.path.clone()).collect();
+                let stop = now_playing.is_some_and(|np| np.artist == artist.name);
+                (
+                    paths,
+                    stop,
+                    format!("Removed {} from the library.", artist.name),
+                )
+            }
+            PendingDelete::Song {
+                artist_idx,
+                song_idx,
+            } => {
+                let artist = self.library.artists.get(artist_idx)?;
+                let song = artist.songs.get(song_idx)?;
+                let stop = now_playing
+                    .is_some_and(|np| np.artist == artist.name && np.title == song.title);
+                (
+                    vec![song.path.clone()],
+                    stop,
+                    format!("Removed {} from the library.", song.title),
+                )
+            }
+        };
+
+        if stop_playback {
+            self.player.send(PlayerCommand::Stop);
+            self.queue.clear();
+        }
+
+        match self.db.remove_paths(&paths).and_then(|()| self.reload_library()) {
+            Ok(()) => {
+                self.selected_artist = self
+                    .selected_artist
+                    .min(self.library.artists.len().saturating_sub(1));
+                self.selected_song = 0;
+                self.set_info(info);
+            }
+            Err(e) => self.set_error(e.to_string()),
+        }
+
+        Some(())
     }
 
     fn execute_command(&mut self) {
