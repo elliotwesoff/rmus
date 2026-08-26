@@ -186,8 +186,8 @@ impl App {
             KeyCode::Char('k') => self.move_selection(-1),
             KeyCode::Char('g') | KeyCode::Home => self.move_to_start(),
             KeyCode::Char('G') | KeyCode::End => self.move_to_end(),
-            KeyCode::Char('h') => self.focus = Focus::Artists,
-            KeyCode::Char('l') => self.focus = Focus::Songs,
+            KeyCode::Char('h') | KeyCode::Left => self.focus = Focus::Artists,
+            KeyCode::Char('l') | KeyCode::Right => self.focus = Focus::Songs,
             KeyCode::Char('z') => self.play_relative(-1),
             KeyCode::Char('x') => self.player.send(PlayerCommand::Restart),
             KeyCode::Char('c') => self.toggle_play_pause(),
@@ -195,6 +195,12 @@ impl App {
             KeyCode::Up => self.player.send(PlayerCommand::AdjustVolume(VOLUME_STEP)),
             KeyCode::Down => self.player.send(PlayerCommand::AdjustVolume(-VOLUME_STEP)),
             KeyCode::Enter => self.play_selected(),
+            KeyCode::Tab => {
+                self.focus = match self.focus {
+                    Focus::Artists => Focus::Songs,
+                    Focus::Songs => Focus::Artists,
+                }
+            }
             KeyCode::Char(':') => {
                 self.command_input.clear();
                 self.mode = Mode::Command;

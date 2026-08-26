@@ -51,8 +51,9 @@ import some music.
 | `j` / `k`   | Move selection down / up                   |
 | `g` / `Home`| Jump to first item                         |
 | `G` / `End` | Jump to last item                          |
-| `h`         | Focus the artists pane                     |
-| `l`         | Focus the songs pane                       |
+| `h` / `←`   | Focus the artists pane                     |
+| `l` / `→`   | Focus the songs pane                       |
+| `Tab`       | Toggle focus between the two panes         |
 | `Enter`     | Play the selected artist/song              |
 | `c`         | Toggle play/pause                          |
 | `x`         | Restart the current track                  |
