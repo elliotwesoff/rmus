@@ -35,6 +35,7 @@ pub struct App {
     pub selected_song: usize,
     pub command_input: String,
     pub status_message: Option<StatusMessage>,
+    pub quit_prompted: bool,
     pub should_quit: bool,
     pub player: PlayerHandle,
     pub player_status: Arc<Mutex<PlayerStatus>>,
@@ -59,6 +60,7 @@ impl App {
             selected_song: 0,
             command_input: String::new(),
             status_message: None,
+            quit_prompted: false,
             should_quit: false,
             player,
             player_status,
@@ -137,12 +139,33 @@ impl App {
             KeyCode::Up => self.player.send(PlayerCommand::AdjustVolume(VOLUME_STEP)),
             KeyCode::Down => self.player.send(PlayerCommand::AdjustVolume(-VOLUME_STEP)),
             KeyCode::Enter => self.play_selected(),
-            KeyCode::Char(':') | KeyCode::Char('i') => {
+            KeyCode::Char(':') => {
                 self.command_input.clear();
                 self.mode = Mode::Command;
             }
-            KeyCode::Esc => self.should_quit = true,
+            KeyCode::Esc => {
+                if !self.command_input.is_empty() {
+                    self.command_input.clear();
+                    return;
+                }
+
+                if self.quit_prompted {
+                    self.should_quit = true;
+                    return;
+                }
+
+                self.set_error("Really quit? (esc again to quit)");
+                self.quit_prompted = true;
+            }
             _ => {}
+        }
+
+        match code {
+            KeyCode::Esc => {},
+            _ => {
+                self.quit_prompted = false;
+                self.set_info("");
+            }
         }
     }
 
@@ -205,9 +228,12 @@ impl App {
         }
     }
 
+    fn is_playing(&mut self) -> bool {
+        player::lock_status(&self.player_status).current.is_some()
+    }
+
     fn toggle_play_pause(&mut self) {
-        let has_current = player::lock_status(&self.player_status).current.is_some();
-        if has_current {
+        if self.is_playing() {
             self.player.send(PlayerCommand::TogglePause);
         } else {
             // Nothing is loaded yet: start playing whatever is currently selected.
