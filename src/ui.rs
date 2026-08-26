@@ -169,12 +169,17 @@ fn draw_command(frame: &mut Frame, app: &App, area: Rect) {
                 area.y,
             ));
         }
+        Mode::Search => {
+            let text = format!("/{}", app.search_input);
+            frame.render_widget(Paragraph::new(text.clone()), area);
+            frame.set_cursor_position(Position::new(area.x + text.len() as u16, area.y));
+        }
         Mode::Normal => {
             let (text, style) = match &app.status_message {
                 Some(msg) if msg.is_error => (msg.text.clone(), Style::default().fg(Color::Red)),
                 Some(msg) => (msg.text.clone(), Style::default()),
                 None => (
-                    "Press : to enter commands, <esc> to quit.".to_string(),
+                    "Press : to enter commands, / to search, <esc> to quit.".to_string(),
                     Style::default().fg(Color::DarkGray),
                 ),
             };

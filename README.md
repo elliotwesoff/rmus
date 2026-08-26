@@ -13,6 +13,8 @@ subsequent launches start up instantly without rescanning.
 - Playback via [rodio](https://github.com/RustAudio/rodio): play/pause,
   restart, skip to next/previous track, volume control
 - Auto-advance through the rest of an album when a track finishes
+- Fuzzy, case-insensitive search within the active pane, with match
+  cycling
 - Tag reading via [lofty](https://github.com/Serial-ATA/lofty-rs) (artist,
   album, year, track number, title, duration)
 - Library persisted in a local SQLite database (via `rusqlite`), so imports
@@ -56,7 +58,19 @@ import some music.
 | `z` / `v`   | Previous / next track (within the album)   |
 | `↑` / `↓`   | Volume up / down                           |
 | `:`         | Enter command mode                         |
+| `/`         | Search the active pane                     |
+| `n` / `N`   | Jump to next / previous search match       |
 | `Esc`       | Cancel input, then quit (press twice)      |
+
+### Search
+
+Press `/` to search whichever pane (artists or songs) currently has focus.
+Matching is fuzzy and case-insensitive, and the selection jumps to the best
+match as you type — an item starting with your query ranks above one that
+just contains it elsewhere, which in turn ranks above a looser, non-
+contiguous match. Press `Enter` to stop typing and keep the selection, `Esc`
+to cancel and restore your previous selection, or `n` / `N` to cycle forward
+/ backward through the remaining matches (wrapping around).
 
 ### Commands
 

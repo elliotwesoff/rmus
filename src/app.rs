@@ -18,6 +18,7 @@ pub enum Focus {
 pub enum Mode {
     Normal,
     Command,
+    Search,
 }
 
 const VOLUME_STEP: f32 = 0.05;
@@ -34,6 +35,14 @@ pub struct App {
     pub selected_artist: usize,
     pub selected_song: usize,
     pub command_input: String,
+    pub search_input: String,
+    /// Indices (within whichever pane's list `search_focus` names) of items matching the most
+    /// recent search, in list order.
+    search_matches: Vec<usize>,
+    search_match_pos: usize,
+    search_focus: Focus,
+    /// Selection to restore if the search is cancelled with `Esc`.
+    search_origin: (usize, usize),
     pub status_message: Option<StatusMessage>,
     pub quit_prompted: bool,
     pub should_quit: bool,
@@ -59,6 +68,11 @@ impl App {
             selected_artist: 0,
             selected_song: 0,
             command_input: String::new(),
+            search_input: String::new(),
+            search_matches: Vec::new(),
+            search_match_pos: 0,
+            search_focus: Focus::Artists,
+            search_origin: (0, 0),
             status_message: None,
             quit_prompted: false,
             should_quit: false,
@@ -82,6 +96,8 @@ impl App {
     /// the database is always the one source of truth for library contents.
     fn reload_library(&mut self) -> Result<(), DbError> {
         self.library = self.db.load_library()?;
+        // Indices captured by a previous search may no longer point at the same items.
+        self.search_matches.clear();
         Ok(())
     }
 
@@ -125,6 +141,26 @@ impl App {
             return;
         }
 
+        if self.mode == Mode::Search {
+            match code {
+                KeyCode::Enter => {
+                    self.mode = Mode::Normal;
+                    self.finish_search();
+                }
+                KeyCode::Esc => self.cancel_search(),
+                KeyCode::Backspace => {
+                    self.search_input.pop();
+                    self.update_search();
+                }
+                KeyCode::Char(c) => {
+                    self.search_input.push(c);
+                    self.update_search();
+                }
+                _ => {}
+            }
+            return;
+        }
+
         match code {
             KeyCode::Char('j') => self.move_selection(1),
             KeyCode::Char('k') => self.move_selection(-1),
@@ -143,6 +179,9 @@ impl App {
                 self.command_input.clear();
                 self.mode = Mode::Command;
             }
+            KeyCode::Char('/') => self.start_search(),
+            KeyCode::Char('n') => self.jump_search(1),
+            KeyCode::Char('N') => self.jump_search(-1),
             KeyCode::Esc => {
                 if !self.command_input.is_empty() {
                     self.command_input.clear();
@@ -160,12 +199,11 @@ impl App {
             _ => {}
         }
 
-        match code {
-            KeyCode::Esc => {},
-            _ => {
-                self.quit_prompted = false;
-                self.set_info("");
-            }
+        if code != KeyCode::Esc {
+            self.quit_prompted = false;
+        }
+        if !matches!(code, KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N')) {
+            self.set_info("");
         }
     }
 
@@ -311,6 +349,117 @@ impl App {
         }
     }
 
+    /// Begins a fuzzy search over whichever pane currently has focus. The pane searched, and the
+    /// selection to restore on `Esc`, are pinned at this point so that later `n`/`N` cycling and
+    /// cancellation are unaffected by focus changes made while typing.
+    fn start_search(&mut self) {
+        self.search_input.clear();
+        self.search_matches.clear();
+        self.search_match_pos = 0;
+        self.search_focus = self.focus;
+        self.search_origin = (self.selected_artist, self.selected_song);
+        self.mode = Mode::Search;
+    }
+
+    /// Restores the pre-search selection and drops back to normal mode.
+    fn cancel_search(&mut self) {
+        self.selected_artist = self.search_origin.0;
+        self.selected_song = self.search_origin.1;
+        self.search_input.clear();
+        self.search_matches.clear();
+        self.mode = Mode::Normal;
+    }
+
+    /// Leaves search mode but keeps the current matches so `n`/`N` can keep cycling through them.
+    fn finish_search(&mut self) {
+        if self.search_input.is_empty() {
+            return;
+        }
+        self.report_search_status();
+    }
+
+    /// Surfaces the current match position (or the lack of any match) in the status line.
+    fn report_search_status(&mut self) {
+        if self.search_matches.is_empty() {
+            self.set_error(format!("no match: {}", self.search_input));
+        } else {
+            self.set_info(format!(
+                "match {}/{} for \"{}\"",
+                self.search_match_pos + 1,
+                self.search_matches.len(),
+                self.search_input
+            ));
+        }
+    }
+
+    /// Recomputes fuzzy matches for the current search input against the pane the search started
+    /// in, and jumps that pane's selection to the first match.
+    fn update_search(&mut self) {
+        self.search_matches = self.matching_indices(self.search_focus, &self.search_input);
+        self.search_match_pos = 0;
+
+        if let Some(&idx) = self.search_matches.first() {
+            self.set_search_selection(idx);
+        }
+    }
+
+    /// Indices of items in `focus`'s pane whose name matches `query`, best match first: an item
+    /// starting with `query` ranks above one that merely contains it, which in turn ranks above a
+    /// non-contiguous fuzzy match. Ties keep list order.
+    fn matching_indices(&self, focus: Focus, query: &str) -> Vec<usize> {
+        if query.is_empty() {
+            return Vec::new();
+        }
+
+        let mut matches: Vec<(usize, MatchKind)> = match focus {
+            Focus::Artists => self
+                .library
+                .artists
+                .iter()
+                .enumerate()
+                .filter_map(|(idx, a)| match_kind(query, &a.name).map(|kind| (idx, kind)))
+                .collect(),
+            Focus::Songs => {
+                let Some(artist) = self.library.artists.get(self.selected_artist) else {
+                    return Vec::new();
+                };
+                artist
+                    .songs
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(idx, s)| match_kind(query, &s.title).map(|kind| (idx, kind)))
+                    .collect()
+            }
+        };
+
+        matches.sort_by_key(|(_, kind)| *kind);
+        matches.into_iter().map(|(idx, _)| idx).collect()
+    }
+
+    fn set_search_selection(&mut self, idx: usize) {
+        match self.search_focus {
+            Focus::Artists => {
+                self.selected_artist = idx;
+                self.selected_song = 0;
+            }
+            Focus::Songs => self.selected_song = idx,
+        }
+    }
+
+    /// Cycles to the next (`delta = 1`) or previous (`delta = -1`) match from the last search,
+    /// wrapping around, and re-focuses the pane that search was run against.
+    fn jump_search(&mut self, delta: isize) {
+        if self.search_matches.is_empty() {
+            return;
+        }
+        let len = self.search_matches.len() as isize;
+        self.search_match_pos = (self.search_match_pos as isize + delta).rem_euclid(len) as usize;
+        self.focus = self.search_focus;
+        let idx = self.search_matches[self.search_match_pos];
+        self.set_search_selection(idx);
+        self.report_search_status();
+    }
+
     fn execute_command(&mut self) {
         let input = self.command_input.trim().to_string();
         self.command_input.clear();
@@ -374,6 +523,40 @@ impl App {
             is_error: false,
         });
     }
+}
+
+/// Relevance of a search match: a match at the very start of the target ranks best, then any
+/// contiguous substring match, then a fuzzy (non-contiguous, in-order) match. Declaration order
+/// doubles as rank order for the derived `Ord`, so sorting by this ascending yields best-first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum MatchKind {
+    Prefix,
+    Contains,
+    Fuzzy,
+}
+
+/// Ranks how `query` matches `target`, case-insensitively, or `None` if it doesn't match at all.
+fn match_kind(query: &str, target: &str) -> Option<MatchKind> {
+    let query = query.to_lowercase();
+    let target = target.to_lowercase();
+
+    if target.starts_with(&query) {
+        Some(MatchKind::Prefix)
+    } else if target.contains(&query) {
+        Some(MatchKind::Contains)
+    } else if fuzzy_subsequence(&query, &target) {
+        Some(MatchKind::Fuzzy)
+    } else {
+        None
+    }
+}
+
+/// Case-insensitive fuzzy subsequence match: every character of `query`, in order, must occur
+/// somewhere in `target`, not necessarily contiguously (e.g. "brg" matches "Bee Gees").
+/// Expects both arguments already lowercased.
+fn fuzzy_subsequence(query: &str, target: &str) -> bool {
+    let mut chars = target.chars();
+    query.chars().all(|qc| chars.any(|tc| tc == qc))
 }
 
 fn clamp_index(current: usize, delta: isize, len: usize) -> usize {
