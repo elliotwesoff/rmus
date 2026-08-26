@@ -349,7 +349,7 @@ impl App {
         }
     }
 
-    /// Begins a fuzzy search over whichever pane currently has focus. The pane searched, and the
+    /// Begins a search over whichever pane currently has focus. The pane searched, and the
     /// selection to restore on `Esc`, are pinned at this point so that later `n`/`N` cycling and
     /// cancellation are unaffected by focus changes made while typing.
     fn start_search(&mut self) {
@@ -392,8 +392,8 @@ impl App {
         }
     }
 
-    /// Recomputes fuzzy matches for the current search input against the pane the search started
-    /// in, and jumps that pane's selection to the first match.
+    /// Recomputes matches for the current search input against the pane the search started in,
+    /// and jumps that pane's selection to the first match.
     fn update_search(&mut self) {
         self.search_matches = self.matching_indices(self.search_focus, &self.search_input);
         self.search_match_pos = 0;
@@ -526,13 +526,12 @@ impl App {
 }
 
 /// Relevance of a search match: a match at the very start of the target ranks best, then any
-/// contiguous substring match, then a fuzzy (non-contiguous, in-order) match. Declaration order
-/// doubles as rank order for the derived `Ord`, so sorting by this ascending yields best-first.
+/// contiguous substring match elsewhere. Declaration order doubles as rank order for the derived
+/// `Ord`, so sorting by this ascending yields best-first.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum MatchKind {
     Prefix,
     Contains,
-    Fuzzy,
 }
 
 /// Ranks how `query` matches `target`, case-insensitively, or `None` if it doesn't match at all.
@@ -544,19 +543,9 @@ fn match_kind(query: &str, target: &str) -> Option<MatchKind> {
         Some(MatchKind::Prefix)
     } else if target.contains(&query) {
         Some(MatchKind::Contains)
-    } else if fuzzy_subsequence(&query, &target) {
-        Some(MatchKind::Fuzzy)
     } else {
         None
     }
-}
-
-/// Case-insensitive fuzzy subsequence match: every character of `query`, in order, must occur
-/// somewhere in `target`, not necessarily contiguously (e.g. "brg" matches "Bee Gees").
-/// Expects both arguments already lowercased.
-fn fuzzy_subsequence(query: &str, target: &str) -> bool {
-    let mut chars = target.chars();
-    query.chars().all(|qc| chars.any(|tc| tc == qc))
 }
 
 fn clamp_index(current: usize, delta: isize, len: usize) -> usize {
