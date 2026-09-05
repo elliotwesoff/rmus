@@ -104,13 +104,7 @@ fn draw_songs(frame: &mut Frame, app: &mut App, area: Rect) {
                 .as_ref()
                 .is_some_and(|np| np.artist_idx == app.selected_artist && np.song_idx == idx);
 
-            let mut title = s.title.clone();
-            let left_area = (area.width - 25) as usize;
-
-            if s.title.len() > left_area {
-                title = format!("{}…", &s.title[0..left_area]);
-            }
-
+            let title = format_title(s.title.clone(), area, 25); // 25 is len of track num, bitrate, time
             let marker = if is_playing { "▶ " } else { "  " };
             let left = format!("{marker}{track} {}", title);
             let bitrate = s
@@ -154,8 +148,9 @@ fn draw_now_playing(frame: &mut Frame, app: &App, area: Rect) {
 
     let (left, right) = match &status.current {
         Some(now) => {
+            let title = format_title(now.title.clone(), area, 50);
             let state = if status.is_paused { "Paused" } else { "Playing" };
-            let left = format!("[{state}] {} - {}", now.artist, now.title);
+            let left = format!("[{state}] {} - {}", now.artist, title);
             let right = format!(
                 "{}/{}  Vol {:>4}",
                 format_duration(status.elapsed),
@@ -220,4 +215,14 @@ fn draw_command(frame: &mut Frame, app: &App, area: Rect) {
 fn format_duration(d: Duration) -> String {
     let total_secs = d.as_secs();
     format!("{:02}:{:02}", total_secs / 60, total_secs % 60)
+}
+
+fn format_title(mut title: String, area: Rect, buffer_area: u16) -> String {
+    let max_len = (area.width - buffer_area) as usize;
+
+    if title.len() > max_len {
+        title = format!("{}…", &title[0..max_len]);
+    }
+
+    title
 }
