@@ -98,19 +98,26 @@ fn draw_songs(frame: &mut Frame, app: &mut App, area: Rect) {
 
             let track = s
                 .track_number
-                .map(|t| format!("{t:02}"))
-                .unwrap_or_else(|| "--".to_string());
+                .map(|t| format!("{t:02}."))
+                .unwrap_or_else(|| "-- ".to_string());
             let is_playing = now_playing
                 .as_ref()
                 .is_some_and(|np| np.artist_idx == app.selected_artist && np.song_idx == idx);
 
+            let mut title = s.title.clone();
+            let left_area = (area.width - 25) as usize;
+
+            if s.title.len() > left_area {
+                title = format!("{}…", &s.title[0..left_area]);
+            }
+
             let marker = if is_playing { "▶ " } else { "  " };
-            let left = format!("{marker}{track}. {}", s.title);
+            let left = format!("{marker}{track} {}", title);
             let bitrate = s
                 .bitrate
                 .map(|kbps| format!("{kbps} kbps"))
                 .unwrap_or_else(|| "-- kbps".to_string());
-            let right = format!("{bitrate}  {}", format_duration(s.duration));
+            let right = format!("{bitrate} {:>5}", format_duration(s.duration));
             let padding = inner_width
                 .saturating_sub(left.chars().count() + right.chars().count())
                 .max(1);
@@ -150,10 +157,10 @@ fn draw_now_playing(frame: &mut Frame, app: &App, area: Rect) {
             let state = if status.is_paused { "Paused" } else { "Playing" };
             let left = format!("[{state}] {} - {}", now.artist, now.title);
             let right = format!(
-                "{}/{}   Vol {:.0}%",
+                "{}/{}  Vol {:>4}",
                 format_duration(status.elapsed),
                 format_duration(now.duration),
-                status.volume * 100.0,
+                format!("{:.0}%", status.volume * 100.0),
             );
             (left, right)
         }
